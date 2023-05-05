@@ -1,0 +1,3 @@
+dependencies:
+  - python
+  - anaconda::beautifulsoup4
