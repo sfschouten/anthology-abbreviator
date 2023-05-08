@@ -1,13 +1,13 @@
+# Anthology Abbreviator
 
+My attempt at automatically generating a version of the ACL anthology with abbreviated proceedings titles.
 
-# Acronym compilation
+WORK IN PROGRESS
 
+## Method
 We try our best to determine a good acronym for all proceedings.
+
 Process each proceedings:
-	- Regex search for acronym in proceedings title
-	- Use `f"{venue-acronym} {year}"`.
-		- If `f"{venue-acronym} {year}"`.
-		- if it is the only proceedings for a given venue and year
-		- If there are others:
-			- 
-			- Find proceedings that contain the name of the venue, 
+  - If proceedings is only one that year for its venue, use f"{venue-acronym} {year}"
+  - If proceedings is not alone in its year
+    - Look for name of venue(s) in proceedings title
