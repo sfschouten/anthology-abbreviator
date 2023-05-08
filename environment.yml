@@ -1,3 +1,6 @@
 dependencies:
   - python
-  - anaconda::beautifulsoup4
+  - pyyaml
+  - lxml
+  - conda-forge::rnc2rng
+  - conda-forge::pv
