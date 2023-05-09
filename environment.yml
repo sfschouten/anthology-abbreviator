@@ -1,6 +1,15 @@
 dependencies:
   - python
+  - pip
   - pyyaml
   - lxml
+  - requests
+  - langcodes
   - conda-forge::rnc2rng
   - conda-forge::pv
+  - conda-forge::citeproc-py
+  - conda-forge::texsoup
+  - conda-forge::slugify
+  - conda-forge::stop-words
+  - pip:
+    - citeproc-py-styles

@@ -2,13 +2,19 @@
 
 import os
 from os.path import join
+import sys
 import logging
 import itertools
+import importlib
 
 import yaml
 import regex as re 
 from lxml import etree
 from bs4 import BeautifulSoup
+
+# import the formatter
+sys.path.append('acl-anthology/bin/')
+formatter = importlib.import_module('anthology.formatter')
 
 LOGLEVEL = os.environ.get('LOGLEVEL', 'INFO').upper()
 logging.basicConfig(level=LOGLEVEL)
@@ -54,7 +60,8 @@ def load_volumes(all_venues):
     Loads volumes from XML files.
     """
     rnc = etree.RelaxNG(file=os.path.join(VOLUMES_PATH, 'schema.rnc'))
-
+    frmtr = formatter.MarkupFormatter()
+    
     all_volumes = []
 
     for child in os.listdir(VOLUMES_PATH):
@@ -99,19 +106,9 @@ def load_volumes(all_venues):
             # title
             title = meta.find('booktitle')
 
-            bibtex_title_parts = []
-            for elem in title.iter():
-
-                if elem.tag == 'booktitle' and elem.text:
-                    bibtex_title_parts.append(elem.text)
-
-                if elem.tag == 'fixed-case':
-                    bibtex_title_parts.extend(('{', elem.text, '}'))
-                    if elem.tail:
-                        bibtex_title_parts.append(elem.tail)
-
-            bibtex_title_text = "".join(bibtex_title_parts)
-            title_text = bibtex_title_text.replace('{', '').replace('}', '')
+            # use acl-anthology formatter to replicate conversion to bibtex/latex exactly.
+            bibtex_title_text = frmtr.as_latex(title)
+            title_text = frmtr.as_text(title)
 
             # build final dict
             volume_dict = {
@@ -178,7 +175,7 @@ def create_substitution_patterns(all_venues, all_volumes):
     def stage_0():
         return []
 
-    def stage_1(volume):
+    def stage_1a(volume):
         year = volume['year']
         venues = [all_venues[slug] for slug in volume['venue_slugs']]
         
@@ -199,32 +196,38 @@ def create_substitution_patterns(all_venues, all_volumes):
 
         return volume['bibtex_title'], shortened
 
-    def stage_2(volume):
+    def stage_1b(volume):
         venues = [all_venues[slug] for slug in volume['venue_slugs']]
         
         # If the venue name(s) appear(s) in the title we can substitute for the venue acronym(s).
-        if volume['venue_name_in_title']:
-            venue_names = r")|(".join([r".*".join([re.escape(v['name']) for v in vs]) for vs in itertools.permutations(venues)])
-            pattern = r"(.*)(?:(" + venue_names + r"))(.*)"
-            
-            match_ = re.search(pattern, volume['title'])
-            if match_:
-                suffix = match_.groups()[-1]
-                acronym = volume['candidate_acronyms']['venues_year'][0]
-                shortened = proc_string(volume) + '{' + acronym + '}' + (suffix or '')
-                return volume['bibtex_title'], shortened 
-            else:
-                logger.error('No match for combined venue names!')
-                logger.error(f" volume.title={volume['title']}")
-                logger.error(f" pattern={pattern}")
+        if not volume['venue_name_in_title']:
+            return None
 
-    def stage_3(volume):
+        venue_names = r")|(".join([r".*".join([re.escape(v['name']) for v in vs]) for vs in itertools.permutations(venues)])
+        pattern = r"(.*)(?:(" + venue_names + r"))(.*)"
+        match_ = re.search(pattern, volume['title'])
+
+        if not match_:
+            logger.error('No match for combined venue names!')
+            logger.error(f" volume.title={volume['title']}")
+            logger.error(f" pattern={pattern}")
+            return None
+
+        suffix = match_.groups()[-1]
+        acronym = volume['candidate_acronyms']['venues_year'][0]
+        shortened = proc_string(volume) + '{' + acronym + '}' + (suffix or '')
+        return volume['bibtex_title'], shortened 
+
+    def stage_2(volume):
         # TODO
         if volume['candidate_acronyms']['venues_year'][0] in volume['title']:
             return 
 
+    def stage_N():
+        return [
+            "s/Proceedings of/Proc. of/g"
+        ]
 
-    # TODO: Improve efficiency by keeping track of which volume titles we have taken care of throughout the stages, and only applying stages after that to the remainder.
 
     sed_lines = []
     
@@ -232,11 +235,15 @@ def create_substitution_patterns(all_venues, all_volumes):
     sed_lines.append('# -- stage 0 --')
     sed_lines.extend(stage_0())
 
-    for s,stage in enumerate([stage_1, stage_2, stage_3], start=1):
+    # first set of stages 
+    stages = [('1a', stage_1a), ('1b', stage_1b)]
+    queue = list(all_volumes)
+    for s, stage in stages:
         logger.info(f'Starting stage {s} ...')
         sed_lines.append(f'# -- stage {s} --')
 
-        for volume in all_volumes:
+        for _ in range(len(queue)): #volume in all_volumes:
+            volume = queue.pop(0)
             pattern = stage(volume)
              
             # If we decided on an acronym use it to create the shortened title.
@@ -244,7 +251,16 @@ def create_substitution_patterns(all_venues, all_volumes):
                 find_str, replace_str = pattern
                 original = re.escape(find_str).replace('/', '\/')
                 substitute = re.escape(replace_str).replace('/', '\/')
-                sed_lines.append(f"s/{original}/{substitute}/g") 
+                sed_lines.append(f"s/{original}/{substitute}/g")
+            else:
+                queue.append(volume)
+
+    # other stages ??
+    
+
+    logger.info(f'Stating stage N ...')
+    sed_lines.append('# -- stage N --')
+    sed_lines.extend(stage_N())
 
     # write replacements to file
     with open('abbreviate.sed', 'w') as f:
